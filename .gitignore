@@ -1,0 +1,22 @@
+# Dependency directories
+node_modules/
+
+# Environment variables (CRITICAL: Keeps your API keys safe!)
+.env
+
+# Workspace / Sandbox directory
+# We ignore the files inside the workspace so you don't commit the AI's messy test files
+workspace/*
+!workspace/.gitkeep
+
+# Python cache (from the AI running Python scripts)
+__pycache__/
+*.py[cod]
+
+# Compiled TypeScript (if you ever run tsc)
+dist/
+build/
+
+# OS generated files
+.DS_Store
+Thumbs.db
