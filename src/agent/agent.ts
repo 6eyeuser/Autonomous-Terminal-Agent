@@ -11,7 +11,7 @@ export class TerminalAgent {
             type: "function",
             function: {
                 name: "execute_command",
-                description: "Execute a bash command in the sandboxed terminal. State (like cwd and exported variables) persists across executions. If a command hangs or prompts for input, you will receive a waiting_for_input status.",
+                description: "Execute a bash command in the sandboxed terminal. State (cwd, vars) persists across executions. If a command hangs or prompts, you will receive a waiting_for_input status.",
                 parameters: { 
                     type: "object", 
                     properties: { 
@@ -26,11 +26,11 @@ export class TerminalAgent {
             type: "function",
             function: {
                 name: "send_input",
-                description: "Send text to a command that is currently waiting for an interactive prompt (e.g., [y/n] confirmations, password requests).",
+                description: "Send text to a command that is currently waiting for an interactive prompt (e.g., [y/n], passwords).",
                 parameters: { 
                     type: "object", 
                     properties: { 
-                        text: { type: "string", description: "The input string to send to the blocked process." },
+                        text: { type: "string", description: "The input string to send." },
                         timeout_seconds: { type: "number" }
                     }, 
                     required: ["text"] 
@@ -49,13 +49,13 @@ export class TerminalAgent {
             type: "function",
             function: {
                 name: "read_file",
-                description: "Read a file from the workspace. For large files, use start_line and end_line to paginate and avoid flooding your context window.",
+                description: "Read a file. For large files, use start_line and end_line to paginate and avoid flooding context.",
                 parameters: { 
                     type: "object", 
                     properties: { 
-                        path: { type: "string", description: "Path to the file." }, 
-                        start_line: { type: "number", description: "The line number to start reading from (1-indexed)." }, 
-                        end_line: { type: "number", description: "The line number to stop reading at." } 
+                        path: { type: "string" }, 
+                        start_line: { type: "number", description: "1-indexed start line." }, 
+                        end_line: { type: "number" } 
                     }, 
                     required: ["path"] 
                 }
@@ -65,12 +65,12 @@ export class TerminalAgent {
             type: "function",
             function: {
                 name: "write_file",
-                description: "Write a COMPLETELY NEW file. Do not use this to edit existing files as it will overwrite them entirely.",
+                description: "Write a COMPLETELY NEW file. Do not use this to edit existing files.",
                 parameters: { 
                     type: "object", 
                     properties: { 
-                        path: { type: "string", description: "Path where the file should be created." }, 
-                        content: { type: "string", description: "The full content of the new file." } 
+                        path: { type: "string" }, 
+                        content: { type: "string" } 
                     }, 
                     required: ["path", "content"] 
                 }
@@ -80,13 +80,13 @@ export class TerminalAgent {
             type: "function",
             function: {
                 name: "str_replace",
-                description: "Replace an exact string in an existing file with new text. This is the safest way to edit code.",
+                description: "Replace an exact string in an existing file with new text. Safest way to edit.",
                 parameters: { 
                     type: "object", 
                     properties: { 
                         path: { type: "string" }, 
-                        old_str: { type: "string", description: "The exact literal string to be replaced. Must match spacing and newlines perfectly." }, 
-                        new_str: { type: "string", description: "The new string to insert." } 
+                        old_str: { type: "string", description: "The exact literal string to be replaced. Must match perfectly." }, 
+                        new_str: { type: "string" } 
                     }, 
                     required: ["path", "old_str", "new_str"] 
                 }
@@ -100,7 +100,7 @@ export class TerminalAgent {
                 parameters: { 
                     type: "object", 
                     properties: { 
-                        summary: { type: "string", description: "A detailed summary of the work completed." } 
+                        summary: { type: "string" } 
                     }, 
                     required: ["summary"] 
                 }
@@ -121,12 +121,14 @@ export class TerminalAgent {
         let stepCount = 0;
         const MAX_STEPS = 25; 
 
+        // TOKEN TRACKERS FOR BENCHMARKING
+        let totalPromptTokens = 0;
+        let totalCompletionTokens = 0;
+
         while (stepCount < MAX_STEPS) {
             stepCount++;
             console.log(`\n--- Step ${stepCount} ---`);
 
-            // AMNESIA FIX: Replace old heavy tool outputs with stubs to save tokens, 
-            // but keep the assistant's actions so it remembers what it did.
             let activeMessages = [...this.messages];
             if (activeMessages.length > 12) {
                 const preserveTailCount = 8; 
@@ -168,6 +170,12 @@ export class TerminalAgent {
             }
 
             if (!response?.choices) continue;
+
+            // TRACK TOKENS
+            if (response.usage) {
+                totalPromptTokens += response.usage.prompt_tokens;
+                totalCompletionTokens += response.usage.completion_tokens;
+            }
 
             const msg = response.choices[0].message;
             this.messages.push(msg); 
@@ -220,7 +228,14 @@ export class TerminalAgent {
                                 break;
                             }
                             console.log(`\n✅ Task Complete! Summary: ${args.summary}`); 
-                            return; 
+                            
+                            // RETURN BENCHMARK STATS ON SUCCESS
+                            return {
+                                success: true,
+                                steps: stepCount,
+                                promptTokens: totalPromptTokens,
+                                completionTokens: totalCompletionTokens
+                            }; 
                         default: 
                             toolResult = `Error: Unknown tool`;
                     }
@@ -228,7 +243,6 @@ export class TerminalAgent {
                     toolResult = `System Error: ${error.message}`;
                 }
 
-                // LLM-Facing Truncation
                 const MAX_LLM_CHARS = 8000;
                 let safeToolResult = toolResult;
                 if (toolResult.length > MAX_LLM_CHARS) {
@@ -241,5 +255,13 @@ export class TerminalAgent {
             }
         }
         console.log("\n❌ Agent hit max steps and was terminated.");
+        
+        // RETURN BENCHMARK STATS ON FAILURE
+        return {
+            success: false,
+            steps: stepCount,
+            promptTokens: totalPromptTokens,
+            completionTokens: totalCompletionTokens
+        };
     }
 }
