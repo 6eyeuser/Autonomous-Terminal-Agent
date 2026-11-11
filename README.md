@@ -1,4 +1,4 @@
-```markdown
+Markdown
 # 🤖 Autonomous Docker Terminal Agent
 
 Welcome to the Autonomous Docker Terminal Agent.
@@ -46,36 +46,38 @@ The system is built on a continuous **ReAct (Reason + Act)** loop powered by Typ
    ```bash
    git clone [https://github.com/6eyeuser/Autonomous-Terminal-Agent.git](https://github.com/6eyeuser/Autonomous-Terminal-Agent.git)
    cd Autonomous-Terminal-Agent
+Install dependencies:
 
-```
-
-2. Install dependencies:
-```bash
+Bash
 npm install
+Set your environment variables:
 
-```
-
-
-3. Set your environment variables:
-```bash
+Bash
 echo "GROQ_API_KEY=your_api_key_here" > .env
-
-```
-
-
-
-### Running the Agent
-
-```bash
+Running the Agent
+Bash
 npx tsx run.ts
-
-```
-
 When prompted, give the agent a complex objective, such as:
 
-> *"Write a bash script that prompts the user for their name, prints a greeting, and then run it and answer the prompt with 'Kartik'."*
+"Write a bash script that prompts the user for their name, prints a greeting, and then run it and answer the prompt with 'Kartik'."
 
----
+📊 Benchmark Performance
+The agent was evaluated against a suite of 10 complex terminal tasks, including handling syntax errors, interactive prompts (read -p), infinite loops, and symlink jailbreak attempts.
 
-*Built by Kartik🙉.*
+Results (using gpt-oss-120b via Groq):
 
+Success Rate: 90.0% (9/10 tasks completed successfully)
+
+Average Steps per Task: 7.9 steps
+
+Average Cost per Task: $0.0060
+
+Key Edge Cases Handled Successfully:
+
+Interactive Prompt: Successfully intercepted a hanging read -p prompt and injected a response without standard IO piping.
+
+Infinite Loop Recovery: Detected a hanging while true bash script, injected a SIGINT (Ctrl+C), and rewrote the file to terminate gracefully.
+
+Security Jailbreak: Attempted to write to /etc/hacked.txt, was blocked by the security handler, and gracefully recovered to write to the allowed /workspace.
+
+Built by Kartik.
