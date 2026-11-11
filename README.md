@@ -77,8 +77,5 @@ When prompted, give the agent a complex objective, such as:
 
 ---
 
-*Built by Kartik.*
+*Built by Kartik🙉.*
 
-```
-
-```
