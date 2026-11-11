@@ -1,111 +1,84 @@
-🤖 Autonomous Docker Terminal Agent
+```markdown
+# 🤖 Autonomous Docker Terminal Agent
 
 Welcome to the Autonomous Docker Terminal Agent.
 
-If you've ever played with open-source AI coding assistants, you know their dirty little secret: the moment a bash script asks Do you want to continue? [y/N] or prompts for a password, the AI freezes, the process hangs, and the whole system crashes.
+If you've ever played with open-source AI coding assistants, you know their dirty little secret: the moment a bash script asks `Do you want to continue? [y/N]` or prompts for a password, the AI freezes, the process hangs, and the whole system crashes.
 
 Most agents just blindly fire strings into standard child processes. This agent operates a persistent, interactive pseudo-terminal (PTY) inside a hardened Docker sandbox. It can write code, run tests, detect when a terminal is waiting for human input, and seamlessly answer those prompts completely on its own.
 
-✨ Why This Agent is Different (The Hard Problems Solved)
+## ✨ Why This Agent is Different (The Hard Problems Solved)
 
 Building an AI that writes code is easy. Building an infrastructure that safely executes and manages that code is incredibly hard. Here is how this project solves the toughest edge cases in AI systems engineering:
 
-1. The Interactive PTY Engine
+* **The Interactive PTY Engine:** Instead of hitting the standard 4096-byte TTY limit or hanging on `read -p`, this agent uses a custom `node-pty` wrapper. It writes large AI-generated scripts to host-side files and `source`s them into a persistent bash session. If a command hangs waiting for input, a background heartbeat detects the idle prompt and hands the AI a `send_input` tool so it can type the answer and hit enter.
+* **The Symlink Path Jail:** LLMs hallucinate. If an AI tries to write a file to `../../etc/passwd` or uses a dangling symlink to escape the workspace, the system stops it. The file handler uses iterative `lstat` and `realpath` resolution to guarantee the AI cannot break out of the `/workspace` directory, closing all symlink jailbreaks.
+* **The Amnesia Fix:** Standard agents pass the entire terminal output back to the LLM. One noisy `npm install` and the context window is blown, causing the AI to forget the original goal. This agent buffers up to 220k characters but aggressively truncates it before it hits the API. Furthermore, old tool outputs are replaced with lightweight stubs, allowing the agent to remember the *actions* it took without crashing the token limit.
+* **The Finish Gate:** The AI is mathematically forbidden from calling it quits until it proves its work. The `finish` tool is locked until the agent runs a test command that returns a clean `0` exit code.
 
-Instead of hitting the standard 4096-byte TTY limit or hanging on read -p, this agent uses a custom node-pty wrapper. It writes large AI-generated scripts to host-side files and sources them into a persistent bash session. If a command hangs waiting for input, a background heartbeat detects the idle prompt and hands the AI a send_input tool so it can type the answer and hit enter.
+## 🏗️ Architecture
 
-2. The "Symlink-Proof" Path Jail
+The system is built on a continuous **ReAct (Reason + Act)** loop powered by TypeScript, Node.js, and the Groq API (`gpt-oss-120b`).
 
-LLMs hallucinate, and malicious code tries to escape. Standard string-matching directory checks (startsWith) are easily bypassed by symlink chains. This agent uses an iterative lstat and realpath resolver (safePath.ts) that walks the directory tree. It guarantees the AI cannot read your host's ~/.ssh keys or write new files outside the designated /workspace, even through dangling symlinks.
+1. **The Sandbox (`DockerSentinelExecutor`):** Ephemeral Docker containers (`node:20-bookworm-slim`) spun up with `--cap-drop=ALL` and restricted PIDs.
+2. **The Execution Engine (`PtyShellExecutor`):** A persistent bash session that maintains state (`cd`, env vars) across turns. It captures exact exit codes using a randomized `__DONE_UUID__:$?` sentinel.
+3. **The LLM Orchestrator:** Manages the context window, handles 429 exponential backoffs, and recovers from JSON parsing errors by injecting nudges back into the prompt.
 
-3. Curing "Context Amnesia"
+## 🛠️ The Tool Arsenal
 
-Feeding a 200,000-character npm install log into an LLM will instantly blow out its context window. But if you just delete old messages to save space, the AI forgets what it just did. This system uses a dual-layer truncation strategy:
+* `execute_command`: Runs bash commands (state persists).
+* `send_input`: Injects text into hanging, interactive processes.
+* `interrupt`: Sends `Ctrl-C` to abort hanging loops.
+* `read_file`: Reads files (supports pagination).
+* `write_file`: Creates entirely new files.
+* `str_replace`: Edits code using exact string replacement (bypassing Node's `$$` regex variable corruption bug).
+* `finish`: Submits the final summary (blocked if unverified).
 
-Middle-Out PTY Buffers: Drops the noise in the middle of massive terminal outputs, keeping the crucial head and tail (where the stack traces live).
+## 💻 Getting Started
 
-Memory Stubbing: When the conversation history gets too long, the agent replaces its oldest tool outputs with a lightweight stub ([Tool output omitted...]), preserving its memory of the actions it took without the token bloat.
+### Prerequisites
+* [Node.js](https://nodejs.org/) (v18+)
+* [Docker Desktop](https://www.docker.com/) running locally
+* A [Groq API Key](https://console.groq.com/)
 
-4. The "Prove It" Finish Gate
+### Setup
+1. Clone the repository:
+   ```bash
+   git clone [https://github.com/6eyeuser/Autonomous-Terminal-Agent.git](https://github.com/6eyeuser/Autonomous-Terminal-Agent.git)
+   cd Autonomous-Terminal-Agent
 
-The AI is strictly forbidden from simply declaring a task "done." The tool handler tracks an internal isDirty state flag. If the AI edits a file, it must execute a bash command to test its work, and that command must return a clean 0 exit code before the system will allow the finish tool to execute.
+```
 
-🏗️ How the Engine Works
-
-The architecture is split into three highly decoupled layers:
-
-The Brain (agent.ts): A continuous ReAct (Reason + Act) loop powered by the Groq API (gpt-oss-120b). It manages the conversation window, handles 429 rate limit backoffs gracefully, and self-corrects JSON parsing errors.
-
-The Hands & The Bouncer (handler.ts & safePath.ts): The tool executor. It exposes a strict API to the LLM (read, write, exact string replace, execute, interrupt). It enforces file security, timeouts, and the exit-code validation gate.
-
-The Sandbox (dockerExecutor.ts): An ephemeral node:20-bookworm-slim Docker container. It spins up with dropped kernel capabilities (--cap-drop=ALL), a strict PID limit to prevent fork bombs, and a memory ceiling. It traps SIGINT (Ctrl+C) to ensure the container is perfectly scrubbed from your system even if you force-quit.
-
-🛠️ The Agent's Toolbelt
-
-The AI has access to the following toolkit to navigate the environment:
-
-execute_command: Runs bash commands. Crucially, state (like cd and export) persists across turns.
-
-send_input: The magic tool. Injects text into hanging, interactive processes.
-
-interrupt: Sends Ctrl-C to abort runaway loops or prompts the AI doesn't know how to answer.
-
-read_file: Reads files with pagination (start_line / end_line) to protect the context window.
-
-write_file: Creates entirely new files.
-
-str_replace: Safely edits code using exact string replacement (bypassing Node.js regex corruption bugs).
-
-finish: Submits the final summary, but only if the workspace passes the automated test gate.
-
-🚀 Getting Started
-
-Prerequisites
-
-Node.js (v18+)
-
-Docker Desktop running locally
-
-A Groq API Key for the LLM
-
-Installation
-
-Clone the repository:
-
-git clone https://github.com/6eyeuser/Autonomous-Terminal-Agent.git
-cd Autonomous-Terminal-Agent
-
-
-Install dependencies:
-
+2. Install dependencies:
+```bash
 npm install
-npm i -D @types/node
+
+```
 
 
-Set your environment variables:
-
+3. Set your environment variables:
+```bash
 echo "GROQ_API_KEY=your_api_key_here" > .env
 
+```
 
-Firing it Up
 
-Start the orchestration loop:
 
+### Running the Agent
+
+```bash
 npx tsx run.ts
 
+```
 
-When the prompt appears, give the agent a challenge that forces it to interact with the shell, like:
+When prompted, give the agent a complex objective, such as:
 
-"Write a bash script that prompts the user for their name, prints a greeting, and then run it. Wait for the script to block, and answer the prompt with the name 'Kartik'."
+> *"Write a bash script that prompts the user for their name, prints a greeting, and then run it and answer the prompt with 'Kartik'."*
 
-🛡️ Security Disclaimer
+---
 
-This agent is explicitly designed to execute untrusted, AI-generated code.
+*Built by Kartik.*
 
-By default, it runs inside a Docker container with all kernel capabilities dropped and restricted limits.
+```
 
-The network is currently set to bridge so the agent can run npm install and apt-get.
-
-If you do not need network access for your tasks, it is highly recommended to change network: "bridge" to network: "none" in run.ts for total air-gapped isolation.
-
-Built with grit, TypeScript, and a lot of iterative lstat checks.
+```
